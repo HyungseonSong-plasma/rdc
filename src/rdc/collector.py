@@ -112,7 +112,7 @@ def collect(plan: CollectionPlan, output: Path) -> bytes:
     finally:
         if stage.exists():
             # Restore only owned staging directory modes for rollback.
-            for directory, _, _ in os.walk(stage, topdown=True, followlinks=False):
-                Path(directory).chmod(0o700)
+            for directory_name, _, _ in os.walk(stage, topdown=True, followlinks=False):
+                Path(directory_name).chmod(0o700)
             shutil.rmtree(stage)
     return manifest
