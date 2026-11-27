@@ -1,0 +1,74 @@
+name: RDC tests
+on:
+  push:
+    branches: [main, 'implementation/**']
+  workflow_dispatch:
+permissions: {}
+jobs:
+  provider:
+    permissions:
+      contents: read
+    uses: HyungseonSong-plasma/work/.github/workflows/reusable_test.yml@314b81ec2b4a72210646787135cd77801d7fb01e
+  offline:
+    needs: provider
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.13'
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: ${{ github.sha }}
+          path: caller
+          persist-credentials: false
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          repository: HyungseonSong-plasma/work
+          ref: c21f73ae8f1bd1f8d80f1ae3955c57607cf85896
+          path: provider
+          persist-credentials: false
+      - name: Build exact reviewed wheels
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git -C caller rev-parse HEAD)" = "$GITHUB_SHA"
+          test "$(git -C provider rev-parse HEAD)" = c21f73ae8f1bd1f8d80f1ae3955c57607cf85896
+          tmp="$RUNNER_TEMP/rdc"
+          mkdir -p "$tmp/backend" "$tmp/dist"
+          python -m pip --isolated download --index-url https://pypi.org/simple --no-deps --only-binary=:all: setuptools==82.0.1 -d "$tmp/backend"
+          (cd "$tmp/backend"; printf '%s  %s\n' a59e362652f08dcd477c78bb6e7bd9d80a7995bc73ce773050228a348ce2e5bb setuptools-82.0.1-py3-none-any.whl | sha256sum -c -)
+          python -m pip --isolated wheel --no-index --find-links "$tmp/backend" --no-deps --wheel-dir "$tmp/dist" ./caller ./provider
+          sha256sum "$tmp/dist/"*.whl
+      - name: Verify production without Work
+        shell: bash
+        run: |
+          set -euo pipefail
+          tmp="$RUNNER_TEMP/rdc"
+          python -m venv "$tmp/production"
+          py="$tmp/production/bin/python"
+          "$py" -m pip --isolated install --no-index --no-deps "$tmp/dist/runtime_dependency_collector-0.1.0.dev0-py3-none-any.whl"
+          "$py" -m pip check
+          "$py" -I -c 'import importlib.util, sys, rdc; from pathlib import Path; from importlib.metadata import requires; from rdc.graph import DependencyGraph; assert Path(rdc.__file__).resolve().is_relative_to(Path(sys.prefix).resolve()); assert not requires("runtime-dependency-collector"); assert importlib.util.find_spec("work") is None; print("RDC production:", rdc.__file__)'
+      - name: Run complete RDC offline contracts
+        shell: bash
+        run: |
+          set -euo pipefail
+          tmp="$RUNNER_TEMP/rdc"
+          python -m venv "$tmp/test"
+          py="$tmp/test/bin/python"
+          "$py" -m pip --isolated install --no-index --no-deps "$tmp/dist/"*.whl
+          "$py" -m pip check
+          "$py" -I -c 'import rdc, work, sys; from pathlib import Path; from importlib.metadata import version; assert all(Path(m.__file__).resolve().is_relative_to(Path(sys.prefix).resolve()) for m in (rdc, work)); assert version("work-framework") == "0.1.0.dev0"; print("Installed:", rdc.__file__, work.__file__)'
+          cd caller
+          env -u PYTHONPATH -u PYTHONHOME "$py" -s -m tests
+      - name: Static quality checks
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip --isolated install --index-url https://pypi.org/simple ruff==0.11.13 mypy==1.15.0
+          cd caller
+          python -m ruff check src tests
+          python -m mypy src
