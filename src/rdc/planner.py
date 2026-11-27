@@ -2,6 +2,7 @@
 
 import posixpath
 from collections.abc import Iterable
+from functools import partial
 from pathlib import PurePosixPath
 
 from rdc.filesystem import snapshot
@@ -98,8 +99,7 @@ def plan_closure(source_root: str, closure: Closure, policy: CollectionPolicy,
     entries = []
     for node in sorted(closure.nodes, key=lambda item: item.target):
         check_path(source_root, policy, node)
-        item = snapshot(node.source)
-        check_mode(node, item)
+        item = snapshot(node.source, guard=partial(check_mode, node))
         entries.append(PlannedEntry(node, item))
     plan = CollectionPlan(source_root, policy, build, closure, tuple(entries))
     _check_layout(plan)

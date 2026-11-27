@@ -18,6 +18,14 @@ def manifest_bytes(plan: CollectionPlan) -> bytes:
             return relative(value)
         return value
 
+    edges = [
+        {"requester": relative(e.requester), "dependency": (
+            relative(e.dependency) if e.dependency is not None else None),
+         "analyzer": e.evidence.analyzer, "relation": e.evidence.relation,
+         "request": request(e.evidence.request), "status": e.status.value,
+         "required": e.required}
+        for e in plan.closure.edges
+    ]
     data = {
         "schema": "rdc.collection.v1",
         "build": plan.build.build,
@@ -27,6 +35,8 @@ def manifest_bytes(plan: CollectionPlan) -> bytes:
         "coverage": sorted(set(plan.build.coverage)),
         "allowed_roots": sorted({relative(p) for p in plan.policy.allowed_roots}),
         "roots": [relative(p) for p in plan.closure.roots],
+        "directories": [{"target": path, "mode": mode}
+                        for path, mode in plan.directories],
         "files": [
             {"source": relative(e.node.source), "target": e.node.target,
              "kind": e.node.kind.value, "mode": e.snapshot.mode,
@@ -34,14 +44,7 @@ def manifest_bytes(plan: CollectionPlan) -> bytes:
              "link": e.snapshot.link}
             for e in plan.entries
         ],
-        "edges": [
-            {"requester": relative(e.requester), "dependency": (
-                relative(e.dependency) if e.dependency is not None else None),
-             "analyzer": e.evidence.analyzer, "relation": e.evidence.relation,
-             "request": request(e.evidence.request), "status": e.status.value,
-             "required": e.required}
-            for e in plan.closure.edges
-        ],
+        "edges": sorted(edges, key=lambda edge: json.dumps(edge, sort_keys=True)),
         "collected_bytes": sum(e.snapshot.size for e in plan.entries),
         "validation": "structural-and-content-only",
     }

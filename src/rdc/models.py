@@ -174,3 +174,15 @@ class CollectionPlan:
     build: BuildIdentity
     closure: Closure
     entries: tuple[PlannedEntry, ...]
+
+    @property
+    def directories(self) -> tuple[tuple[str, int], ...]:
+        """Explicit directories keep their modes; synthetic parents use 0755."""
+        modes: dict[str, int] = {"/": 0o755}
+        for entry in self.entries:
+            target = PurePosixPath(entry.node.target)
+            for parent in target.parents:
+                modes.setdefault(str(parent), 0o755)
+            if entry.node.kind is DependencyKind.DIRECTORY:
+                modes[str(target)] = entry.snapshot.mode
+        return tuple(sorted(modes.items()))

@@ -1,5 +1,6 @@
 from contextlib import contextmanager
 import json
+import os
 from pathlib import Path
 import tempfile
 from unittest.mock import patch
@@ -115,8 +116,10 @@ class CollectionContract(TestSuite):
         def check(ctx, mode):
             with fixture(ctx):
                 source = add(ctx, "bad", "/bad", mode=mode)
-                with self.assertRaises(PolicyError):
-                    plan(ctx, source)
+                with patch("rdc.filesystem._read_regular") as reader:
+                    with self.assertRaises(PolicyError):
+                        plan(ctx, source)
+                    reader.assert_not_called()
                 self.assertFalse(ctx.output.exists())
                 self.assertEqual(Path(source).stat().st_mode & 0o7777, mode)
 
@@ -240,5 +243,55 @@ class CollectionContract(TestSuite):
                 a = add(ctx, "a", "/a")
                 second = manifest_bytes(plan(ctx, b, a))
             self.assertEqual(first, second)
+
+        self.run_contract(check=check)
+
+    def test_implicit_directory_modes_and_inventory(self):
+        def check(ctx):
+            with fixture(ctx):
+                source = add(ctx, "file", "/usr/lib/file")
+                original = plan(ctx, source)
+                previous = os.umask(0o077)
+                try:
+                    manifest = json.loads(collect(original, ctx.output))
+                finally:
+                    os.umask(previous)
+                self.assertEqual(manifest["directories"], [
+                    {"target": "/", "mode": 0o755},
+                    {"target": "/usr", "mode": 0o755},
+                    {"target": "/usr/lib", "mode": 0o755},
+                ])
+                for relative in (".", "usr", "usr/lib"):
+                    self.assertEqual((ctx.output / relative).stat().st_mode & 0o777, 0o755)
+
+        self.run_contract(check=check)
+
+    def test_unplanned_file_rejected(self):
+        def check(ctx):
+            with fixture(ctx):
+                source = add(ctx, "file", "/file")
+                original = plan(ctx, source)
+                from rdc.collector import _copy
+
+                def inject(stage, entry):
+                    _copy(stage, entry)
+                    (stage / "unplanned").write_text("unexpected")
+
+                with patch("rdc.collector._copy", side_effect=inject):
+                    with self.assertRaisesRegex(CollectionError, "staged paths"):
+                        collect(original, ctx.output)
+                self.assertFalse(ctx.output.exists())
+                self.assertEqual(tuple(ctx.root.glob(".rdc-*")), ())
+
+        self.run_contract(check=check)
+
+    def test_fifo_rejected(self):
+        def check(ctx):
+            with fixture(ctx):
+                source = ctx.source / "pipe"
+                os.mkfifo(source)
+                ctx.graph.add_node(Dependency(str(source), "/pipe", DependencyKind.DATA))
+                with self.assertRaises(PolicyError):
+                    plan(ctx, str(source))
 
         self.run_contract(check=check)

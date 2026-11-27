@@ -1,9 +1,10 @@
 """No-follow filesystem reads and stable content snapshots (Linux)."""
 
+import errno
 import hashlib
 import os
 import stat
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from pathlib import PurePosixPath
 from typing import BinaryIO
@@ -45,6 +46,15 @@ def _read_regular(parent: int, name: str, before: os.stat_result,
     with os.fdopen(fd, "rb") as stream:
         if identity(os.fstat(stream.fileno())) != identity(before):
             raise FilesystemError("Source changed before reading.")
+        # File capabilities are privilege-bearing even without setuid bits.
+        try:
+            capabilities = os.getxattr(stream.fileno(), "security.capability")
+        except OSError as error:
+            if error.errno not in (errno.ENODATA, errno.ENOTSUP):
+                raise
+        else:
+            if capabilities:
+                raise FilesystemError("File capabilities are not supported.")
         digest = hashlib.sha256()
         while chunk := stream.read(1024 * 1024):
             digest.update(chunk)
@@ -55,11 +65,17 @@ def _read_regular(parent: int, name: str, before: os.stat_result,
     return digest.hexdigest()
 
 
-def snapshot(path: str, output: BinaryIO | None = None) -> FileSnapshot:
+def snapshot(path: str, output: BinaryIO | None = None, *,
+             guard: Callable[[int], None] | None = None,
+             expected: FileSnapshot | None = None) -> FileSnapshot:
     """Read a file or link without dereferencing it; detect replacement/drift."""
     try:
         with parent_fd(path) as (parent, name):
             before = os.stat(name, dir_fd=parent, follow_symlinks=False)
+            if guard is not None:
+                guard(before.st_mode)
+            if expected is not None and identity(before) != expected.identity:
+                raise FilesystemError("Source identity differs from plan.")
             mode = stat.S_IMODE(before.st_mode)
             digest, link, size = None, None, 0
             if stat.S_ISREG(before.st_mode):

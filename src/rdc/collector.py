@@ -22,19 +22,17 @@ def _target(stage: Path, entry: PlannedEntry) -> Path:
 
 def _copy(stage: Path, entry: PlannedEntry) -> None:
     destination = _target(stage, entry)
-    destination.parent.mkdir(parents=True, exist_ok=True)
     expected = entry.snapshot
     if entry.node.kind is DependencyKind.DIRECTORY:
-        destination.mkdir(exist_ok=True)
-        actual = snapshot(entry.node.source)
+        actual = snapshot(entry.node.source, expected=expected)
     elif entry.node.kind is DependencyKind.SYMLINK:
-        actual = snapshot(entry.node.source)
+        actual = snapshot(entry.node.source, expected=expected)
         if actual != expected or actual.link is None:
             raise CollectionError(f"Source changed: {entry.node.source}")
         destination.symlink_to(actual.link)
     else:
         with destination.open("xb") as stream:
-            actual = snapshot(entry.node.source, stream)
+            actual = snapshot(entry.node.source, stream, expected=expected)
         destination.chmod(expected.mode)
     if actual != expected:
         raise CollectionError(f"Source changed: {entry.node.source}")
@@ -53,6 +51,20 @@ def _publish(stage: Path, output: Path) -> None:
             raise OSError(error, os.strerror(error), str(output))
 
 
+def _inventory(stage: Path) -> set[str]:
+    """Walk only actual directories, never dereference runtime links."""
+    found = {"/"}
+    pending = [stage]
+    while pending:
+        with os.scandir(pending.pop()) as entries:
+            for entry in entries:
+                path = Path(entry.path)
+                found.add("/" + path.relative_to(stage).as_posix())
+                if entry.is_dir(follow_symlinks=False):
+                    pending.append(path)
+    return found
+
+
 def collect(plan: CollectionPlan, output: Path) -> bytes:
     """Return canonical manifest after a successful atomic root publication."""
     canonical_path(str(output))
@@ -69,20 +81,33 @@ def collect(plan: CollectionPlan, output: Path) -> bytes:
     manifest = manifest_bytes(plan)
     stage = Path(tempfile.mkdtemp(prefix=".rdc-", dir=output.parent))
     try:
-        # Directory creation precedes mode application so read-only directories
-        # remain materializable. Links cannot be ancestors of planned targets.
+        # Create all parents explicitly; do not inherit process umask in final modes.
+        stage.chmod(0o700)
+        for path, _ in plan.directories:
+            if path != "/":
+                directory = stage / path.lstrip("/")
+                directory.mkdir(mode=0o700)
+                directory.chmod(0o700)
         for entry in plan.entries:
             _copy(stage, entry)
-        for entry in reversed(plan.entries):
-            if entry.node.kind is DependencyKind.DIRECTORY:
-                _target(stage, entry).chmod(entry.snapshot.mode)
+        for path, mode in reversed(plan.directories):
+            (stage / path.lstrip("/")).chmod(mode)
         for entry in plan.entries:
-            if snapshot(entry.node.source) != entry.snapshot:
+            if snapshot(entry.node.source, expected=entry.snapshot) != entry.snapshot:
                 raise CollectionError(f"Source changed: {entry.node.source}")
             actual = snapshot(str(_target(stage, entry)))
             if not same_content(actual, entry.snapshot):
                 raise CollectionError(f"Readback mismatch: {entry.node.target}")
-        stage.chmod(0o755)
+        expected_paths = {entry.node.target for entry in plan.entries}
+        expected_paths.update(path for path, _ in plan.directories)
+        if _inventory(stage) != expected_paths:
+            raise CollectionError("Unexpected or missing staged paths.")
+        for path, mode in plan.directories:
+            directory = stage / path.lstrip("/")
+            if not directory.is_dir() or directory.is_symlink():
+                raise CollectionError(f"Directory readback mismatch: {path}")
+            if directory.stat().st_mode & 0o7777 != mode:
+                raise CollectionError(f"Directory mode mismatch: {path}")
         _publish(stage, output)
     finally:
         if stage.exists():

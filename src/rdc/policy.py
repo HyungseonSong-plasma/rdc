@@ -3,7 +3,7 @@
 import stat
 from pathlib import PurePosixPath
 
-from rdc.models import CollectionPolicy, Dependency, DependencyKind, FileSnapshot, canonical_path
+from rdc.models import CollectionPolicy, Dependency, DependencyKind, canonical_path
 
 
 class PolicyError(ValueError):
@@ -33,17 +33,16 @@ def check_path(source_root: str, policy: CollectionPolicy, node: Dependency) -> 
             raise PolicyError(f"Sensitive or virtual path: {candidate}")
 
 
-def check_mode(node: Dependency, item: FileSnapshot) -> None:
-    mode = item.identity[2]
+def check_mode(node: Dependency, mode: int) -> None:
     if mode & (stat.S_ISUID | stat.S_ISGID | stat.S_ISVTX):
         raise PolicyError(f"Privilege or special mode: {node.source}")
     if node.kind is DependencyKind.SYMLINK:
         valid = stat.S_ISLNK(mode)
     elif node.kind is DependencyKind.DIRECTORY:
-        valid = stat.S_ISDIR(mode) and (item.mode & 0o005) == 0o005
+        valid = stat.S_ISDIR(mode) and (mode & 0o555) == 0o555
     else:
-        valid = stat.S_ISREG(mode) and bool(item.mode & 0o004)
+        valid = stat.S_ISREG(mode) and (mode & 0o444) == 0o444
         if node.kind in (DependencyKind.EXECUTABLE, DependencyKind.INTERPRETER):
-            valid = valid and bool(item.mode & 0o001)
+            valid = valid and (mode & 0o111) == 0o111
     if not valid:
         raise PolicyError(f"Type or portable read/execute mode mismatch: {node.source}")
