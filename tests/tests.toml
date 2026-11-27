@@ -1,2 +1,2 @@
-offline = ["models", "graph", "collection", "elf", "architecture"]
-integration = ["elf_runtime"]
+offline = ["models", "graph", "collection", "elf", "jit", "architecture"]
+integration = ["elf_runtime", "jit_runtime"]

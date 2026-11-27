@@ -1,4 +1,4 @@
-"""P4 import and explicit-registration contracts (not a sandbox)."""
+"""P5 import and explicit-registration contracts (not a sandbox)."""
 
 import ast
 import sys
@@ -11,6 +11,11 @@ IMPORTS = {
     "models.py": frozenset(),
     "discovery/__init__.py": frozenset(),
     "discovery/elf.py": frozenset({"rdc.filesystem"}),
+    "discovery/process.py": frozenset({"rdc.models"}),
+    "discovery/trace.py": frozenset({"rdc.discovery.process", "rdc.models"}),
+    "discovery/jit.py": frozenset({
+        "rdc.discovery.process", "rdc.discovery.trace", "rdc.graph", "rdc.models",
+    }),
     "discovery/paths.py": frozenset({"rdc.filesystem", "rdc.models", "rdc.policy"}),
     "discovery/loader.py": frozenset({
         "rdc.discovery.elf", "rdc.discovery.paths", "rdc.graph", "rdc.models",
