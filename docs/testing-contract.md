@@ -1,47 +1,33 @@
-# Testing Contract — RDC v0.1
-Status: proposed for adoption (P0). Authority: this document after merge. Tracking: #1.
+# Testing Contract
 
-## Provider boundary
-Reuse the installed `work-framework` package (development version 0.1.0.dev0) as test-only infrastructure.
-- Provider: HyungseonSong-plasma/work exact source SHA `c21f73ae8f1bd1f8d80f1ae3955c57607cf85896`.
-- Reusable workflow revision: `314b81ec2b4a72210646787135cd77801d7fb01e`.
-- The two revisions are intentionally distinct. The latter adds consumer workflow/docs/tests, not framework implementation changes.
-- Install reviewed provider wheel into isolated test environment; verify exact provider commit, artifact hash and installed module location. No editable provider checkout, floating main, vendoring or sys.path hacks. No Work dependency in RDC production metadata or imports. No stable release/license grant implied.
+Status: Proposed (P0). Normative after merge. Tracking: [#1](https://github.com/HyungseonSong-plasma/rdc/issues/1).
 
-## T01–T10 — Test rules
-T01. Ordinary test suites extend public `work.libs.testing.TestSuite`.
-T02. Explicit imports and `SuiteRegistry` registration, ordered RDC-owned TOML manifest. Unknown, duplicate, omitted, empty or unexpected suites fail.
-T03. One final framework runner per test: `run_cases(cases, check)`, `run_contract(act, check, ...)` or compact `run_contract(check=check)`, or `run_scenario(steps, check, ...)`. Follow provider grammar, no lifecycle override or self-test exemption for RDC.
-T04. RDC owns fixtures and assertions, including independent expected values, fresh contexts and temporary filesystem cleanup. Expected exceptions apply only to the action; cleanup must not suppress failure.
-T05. Production modules cannot import Work, tests or test fixtures.
-T06. Use public Work APIs only; private grammar is enforced transitively by SuiteRegistry.
-T07. Provider revision updates require compatibility evidence and review.
-T08. Offline unit tests do not require Docker, external networks, actual system changes or GitHub credentials.
-T09. Integration tests run as explicitly selected complete suite groups with separate prerequisites; skipped required gates are not a pass.
-T10. Architecture tests enforce reviewed import graph and registry coverage; reject unregistered tests. AST checks are structural, not a security sandbox or proof of assertion adequacy.
+## Rules
 
-## Test layout
-```
-tests/
-  __init__.py
-  __main__.py             # python -m tests; RDC-owned, no work test command
-  wiring.py               # independent registry and ordered group selection
-  tests.toml
-  fixtures.py
-  architecture.py
-  work_contract.py        # standalone installed-provider smoke
-  suites/                 # explicit imports and named offline contracts
-  integration/            # separately registered ELF/JIT/Docker suites
-  fixtures/               # static fixture data where needed
-```
-The wiring must use separate SuiteRegistry instances or explicit complete per-group registries so selecting integration groups does not weaken registry completeness. Final layout may be refined in P1; no empty speculative suite files.
+| ID | Requirement |
+|---|---|
+| T01 | Ordinary suites extend public `TestSuite`. |
+| T02 | Explicit imports, `SuiteRegistry`, ordered RDC TOML; reject unknown, missing, duplicate, empty or unexpected suites. |
+| T03 | One final runner: `run_cases`, `run_contract` or `run_scenario`; enforce grammar; no lifecycle override/exemption. |
+| T04 | Independent RDC fixtures/expectations; fresh contexts, cleanup; expected exceptions apply to action only; no suppressed failures. |
+| T05 | No Work/tests/fixtures in production imports or metadata dependencies. |
+| T06 | Public Work APIs only; grammar enforced through registry. |
+| T07 | Pin provider SHA; review updates with compatibility evidence. |
+| T08 | Offline tests: no Docker, network, credentials or system changes. |
+| T09 | Separate complete integration registries/groups; missing prerequisite or skipped required gate fails. |
+| T10 | Enforce import DAG and registration coverage; AST is not a sandbox or assertion proof. |
 
-## CI boundary
-- Work consumer gate uses pinned `.github/workflows/reusable_test.yml` and standalone `tests/work_contract.py`. It runs in isolated Python outside caller checkout, with no RDC install, so must test only provider compatibility, including all three runner forms and rejection behavior.
-- RDC offline gate builds/installs RDC and Work in a fresh environment and runs RDC-owned full offline registry and architecture checks. Verify actual installed paths, dependency separation and nonzero test counts. Also test production import/CLI in environment without Work.
-- RDC integration gate separately validates real ELF/compiler/JIT/Docker fixtures; fail on missing required prerequisites.
-- Physics numerical regression belongs to Physics, not the generic RDC package.
-- Work's existing consumer workflow supports trusted owner push/dispatch only, fresh run attempt, no secrets inheritance or write permissions. Follow its event constraints and own repository policy. Do not modify Work workflow to execute arbitrary caller commands.
+## Wiring and CI
 
-## Required evidence
-P1: exact provider/caller SHAs, wheel hashes, installed paths, suite/case outcomes, verified grammar rejection, production import without Work. P2+: deterministic graph duplicates/cycles/unresolved evidence, path traversal/symlink chains/collisions, inaccessible/privileged files, source mutation/rollback, manifest determinism, missing dependencies and actual cold-cache JIT. Include regression for Physics broad /usr copy failure without reproducing privileged system changes. Use temporary synthetic fixtures; do not use production validators as expected-value oracles. Record failing test and gate, do not mask with retries.
+RDC owns `tests/{__main__,wiring,fixtures,architecture,work_contract}.py`, `tests.toml`, explicit `suites/` and `integration/`; no empty speculative files. Run `python -m tests`, not `work test`.
+
+| Gate | Evidence |
+|---|---|
+| Provider | Installed wheel, SHA/hash/path; standalone `work_contract.py`: three runners + rejection |
+| RDC offline | Fresh installed RDC + Work; complete suite/case results, architecture, nonzero counts; production import/CLI without Work |
+| Integration | Real ELF, compiler, cold-cache JIT, Docker; separate prerequisites |
+| Physics | Numerical regression in Physics repository |
+
+Provider pins and workflow constraints: [ADR 0002](adr/0002-reuse-work-testing.md). P1 records exact caller/provider SHAs, wheel hashes, installed paths and results.
+
+**Regression minimum (P2+):** graph cycles/duplicates/unresolved edges; traversal, links, collisions, unreadable/privileged files; drift/rollback; deterministic manifests; missing dependencies; cold-cache JIT. Reproduce broad-copy failures with temporary synthetic fixtures, not privileged system changes. Report failure and gate; no masking retries.
