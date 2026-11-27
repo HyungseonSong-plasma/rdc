@@ -1,4 +1,4 @@
-"""P2 import and explicit-registration contracts (not a sandbox)."""
+"""P3 import and explicit-registration contracts (not a sandbox)."""
 
 import ast
 import sys
@@ -10,6 +10,11 @@ IMPORTS = {
     "__init__.py": frozenset(),
     "models.py": frozenset(),
     "graph.py": frozenset({"rdc.models"}),
+    "filesystem.py": frozenset({"rdc.models"}),
+    "policy.py": frozenset({"rdc.models"}),
+    "planner.py": frozenset({"rdc.models", "rdc.graph", "rdc.filesystem", "rdc.policy"}),
+    "manifest.py": frozenset({"rdc.models"}),
+    "collector.py": frozenset({"rdc.models", "rdc.filesystem", "rdc.planner", "rdc.manifest"}),
 }
 
 
