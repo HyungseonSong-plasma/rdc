@@ -52,17 +52,25 @@ class JitContract(TestSuite):
 
     def test_invalid_trace_records(self):
         cases = (
-            ("truncated", 'openat(AT_FDCWD, "\\x2f"..., O_RDONLY) = 3'),
-            ("plain", 'openat(AT_FDCWD, "/file", O_RDONLY) = 3'),
-            ("flags", opening("/file", "UNKNOWN")),
-            ("unfinished", 'openat(AT_FDCWD, <unfinished ...>'),
-            ("unknown", 'stat("/file", {}) = 0'),
-            ("failure", opening("/file", result="-1")),
+            ("truncated", "truncated"),
+            ("plain", "plain"),
+            ("flags", "flags"),
+            ("unfinished", "unfinished"),
+            ("unknown", "unknown"),
+            ("failure", "failure"),
         )
 
-        def check(ctx, line):
+        def check(ctx, case):
+            lines = {
+                "truncated": 'openat(AT_FDCWD, "\\x2f"..., O_RDONLY) = 3',
+                "plain": 'openat(AT_FDCWD, "/file", O_RDONLY) = 3',
+                "flags": opening("/file", "UNKNOWN"),
+                "unfinished": 'openat(AT_FDCWD, <unfinished ...>',
+                "unknown": 'stat("/file", {}) = 0',
+                "failure": opening("/file", result="-1"),
+            }
             with self.assertRaises(TraceError):
-                parse_trace((line,), "/work")
+                parse_trace((lines[case],), "/work")
 
         self.run_cases(cases, check)
 
