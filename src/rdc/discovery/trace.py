@@ -101,17 +101,19 @@ def parse_trace(lines: Iterable[str], workspace: str,
                 external_roots: tuple[str, ...] = ("/proc", "/sys", "/dev", "/run")
                 ) -> tuple[TraceEvent, ...]:
     """Fail closed on unparsed events; failed probes and writes remain evidence."""
+    if isinstance(lines, str):
+        raise TraceError("Expected trace lines, not a raw text string.")
     canonical_path(workspace)
     for path in external_roots:
         canonical_path(path)
     events = []
-    for raw in lines:
+    for line_number, raw in enumerate(lines, start=1):
         line = raw.strip()
         if not line or line.startswith("--- ") or line.startswith("+++ "):
             continue
         match = _SYSCALL.fullmatch(line)
         if match is None:
-            raise TraceError("Unsupported or incomplete syscall record.")
+            raise TraceError(f"Unsupported or incomplete syscall record at line {line_number}.")
         operation, arguments, result, errno = match.groups()
         path, suffix = _decode_argument(arguments, operation)
         if operation in _EXEC:
@@ -180,7 +182,8 @@ def capture_trace(tracer: str, argv: tuple[str, ...], workspace: Path,
                 raise TraceError("Trace exceeds configured parse budget.")
             data = stream.read_bytes()
             digests.append(hashlib.sha256(data).hexdigest())
-            events.extend(parse_trace(data.decode("utf-8"), str(workspace), external_roots))
+            events.extend(parse_trace(data.decode("utf-8").splitlines(),
+                                      str(workspace), external_roots))
         if not any(event.success and event.access is Access.EXEC for event in events):
             raise TraceError("Trace contains no successful exec.")
         return TraceReport(tuple(events), result.stdout, tuple(sorted(digests)))

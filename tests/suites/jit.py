@@ -1,10 +1,11 @@
+import hashlib
 from pathlib import Path
 import tempfile
 from unittest.mock import patch
 
 from rdc.discovery.jit import add_jit_inputs, query_compiler
 from rdc.discovery.process import ToolError, ToolResult, run_tool
-from rdc.discovery.trace import Access, Scope, TraceError, TraceReport, parse_trace
+from rdc.discovery.trace import Access, Scope, TraceError, TraceReport, capture_trace, parse_trace
 from rdc.graph import DependencyGraph
 from rdc.models import Dependency, DependencyKind
 from tests.wiring import register
@@ -73,6 +74,36 @@ class JitContract(TestSuite):
                 parse_trace((lines[case],), "/work")
 
         self.run_cases(cases, check)
+
+    def test_capture_multiline_streams(self):
+        def check(ctx):
+            with tempfile.TemporaryDirectory() as directory:
+                workspace = Path(directory)
+                first = (f"execve({encoded('/usr/bin/g++')}, [], 0x0) = 0\n"
+                         + opening("/usr/include/a.h") + "\n")
+                second = opening("/usr/include/b.h") + "\n"
+
+                def fake_tool(argv, cwd, env, timeout):
+                    prefix = Path(argv[argv.index("-o") + 1])
+                    prefix.with_suffix(".101").write_bytes(first.encode())
+                    prefix.with_suffix(".102").write_bytes(second.encode())
+                    return ToolResult("42\n", "")
+
+                with patch("rdc.discovery.trace.run_tool", side_effect=fake_tool):
+                    report = capture_trace("/usr/bin/strace", ("/usr/bin/g++",),
+                                           workspace, {})
+                self.assertEqual(report.candidates, (
+                    "/usr/bin/g++", "/usr/include/a.h", "/usr/include/b.h",
+                ))
+                self.assertEqual(len(report.events), 3)
+                self.assertEqual(report.stdout, "42\n")
+                self.assertEqual(report.stream_sha256, tuple(sorted(
+                    hashlib.sha256(data.encode()).hexdigest() for data in (first, second)
+                )))
+                with self.assertRaisesRegex(TraceError, "raw text"):
+                    parse_trace(first, str(workspace))
+
+        self.run_contract(check=check)
 
     def test_explicit_inputs_only(self):
         def check(ctx):
