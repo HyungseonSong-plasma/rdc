@@ -147,6 +147,7 @@ class _Discovery:
                 path = canonical_path(metadata.interpreter)
                 self._request(source, "interpreter", path, (path,), DependencyKind.INTERPRETER)
             for name in metadata.needed:
+                candidates: tuple[str, ...]
                 if "/" in name:
                     candidates = (canonical_path(name),)
                 elif "$" in name:

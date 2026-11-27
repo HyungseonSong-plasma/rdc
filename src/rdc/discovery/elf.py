@@ -144,8 +144,11 @@ def _parse(stream: BinaryIO, size: int) -> ElfMetadata:
             soname = _string(strings, values[14][0]) if 14 in values else None
         nodeflib = bool(values.get(0x6ffffffb, [0])[0] & 0x800)
     stream.seek(0)
-    digest = hashlib.file_digest(stream, "sha256").hexdigest()
-    return ElfMetadata(interpreter, needed, runpath, rpath, soname, nodeflib, digest)
+    digest = hashlib.sha256()
+    while chunk := stream.read(1024 * 1024):
+        digest.update(chunk)
+    return ElfMetadata(interpreter, needed, runpath, rpath, soname, nodeflib,
+                       digest.hexdigest())
 
 
 def read_elf(path: str) -> ElfMetadata:
