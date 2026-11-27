@@ -101,6 +101,12 @@ def plan_closure(source_root: str, closure: Closure, policy: CollectionPolicy,
         check_path(source_root, policy, node)
         item = snapshot(node.source, guard=partial(check_mode, node))
         entries.append(PlannedEntry(node, item))
+    snapshots = {entry.node.source: entry.snapshot for entry in entries}
+    for edge in closure.edges:
+        if edge.evidence.analyzer == "elf" and edge.evidence.relation == "elf-sha256":
+            if (edge.dependency != edge.requester or edge.status is not Resolution.RESOLVED
+                    or snapshots[edge.requester].sha256 != edge.evidence.request):
+                raise PlanError(f"ELF changed after discovery: {edge.requester}")
     plan = CollectionPlan(source_root, policy, build, closure, tuple(entries))
     _check_layout(plan)
     return plan

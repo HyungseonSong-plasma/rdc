@@ -1,4 +1,4 @@
-"""P3 import and explicit-registration contracts (not a sandbox)."""
+"""P4 import and explicit-registration contracts (not a sandbox)."""
 
 import ast
 import sys
@@ -9,6 +9,12 @@ ROOT = Path(__file__).resolve().parents[1]
 IMPORTS = {
     "__init__.py": frozenset(),
     "models.py": frozenset(),
+    "discovery/__init__.py": frozenset(),
+    "discovery/elf.py": frozenset({"rdc.filesystem"}),
+    "discovery/paths.py": frozenset({"rdc.filesystem", "rdc.models", "rdc.policy"}),
+    "discovery/loader.py": frozenset({
+        "rdc.discovery.elf", "rdc.discovery.paths", "rdc.graph", "rdc.models",
+    }),
     "graph.py": frozenset({"rdc.models"}),
     "filesystem.py": frozenset({"rdc.models"}),
     "policy.py": frozenset({"rdc.models"}),
@@ -52,11 +58,11 @@ def repository_violations():
     return tuple(failures)
 
 
-def registration_violations(registry):
+def registration_violations(registry, group="suites"):
     """Compare declared test classes/methods with the actual registered suites."""
     import unittest
 
-    directory = ROOT / "tests" / "suites"
+    directory = ROOT / "tests" / group
     expected = {}
     for path in sorted(directory.rglob("*.py")):
         if path.name == "__init__.py":
