@@ -1,1 +1,1 @@
-offline = ["models", "graph", "architecture"]
+offline = ["models", "graph", "collection", "architecture"]

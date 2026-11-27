@@ -118,3 +118,59 @@ class Closure:
     def complete(self) -> bool:
         """No known required blocker; not proof of workload coverage."""
         return not self.blockers
+
+
+@dataclass(frozen=True, slots=True)
+class FileSnapshot:
+    """Content and local identity; only content enters the canonical manifest."""
+
+    mode: int
+    size: int
+    sha256: str | None
+    link: str | None
+    identity: tuple[int, int, int, int, int, int]
+
+
+@dataclass(frozen=True, slots=True)
+class CollectionPolicy:
+    allowed_roots: tuple[str, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class BuildIdentity:
+    build: str
+    profile_sha256: str
+    abi: str
+    tools: tuple[tuple[str, str], ...]
+    coverage: tuple[str, ...]
+
+    def __post_init__(self) -> None:
+        nonempty(self.build, "build identity")
+        nonempty(self.abi, "ABI")
+        if (len(self.profile_sha256) != 64
+                or any(c not in "0123456789abcdef" for c in self.profile_sha256)):
+            raise ValueError("Expected lowercase SHA256 profile digest.")
+        for name, version in self.tools:
+            nonempty(name, "tool name")
+            nonempty(version, "tool version")
+        if len({name for name, _ in self.tools}) != len(self.tools):
+            raise ValueError("Duplicate tool name.")
+        if not self.coverage:
+            raise ValueError("Expected explicit validation coverage.")
+        for item in self.coverage:
+            nonempty(item, "coverage")
+
+
+@dataclass(frozen=True, slots=True)
+class PlannedEntry:
+    node: Dependency
+    snapshot: FileSnapshot
+
+
+@dataclass(frozen=True, slots=True)
+class CollectionPlan:
+    source_root: str
+    policy: CollectionPolicy
+    build: BuildIdentity
+    closure: Closure
+    entries: tuple[PlannedEntry, ...]
