@@ -72,11 +72,13 @@ jobs:
           cd caller
           python -m ruff check src tests
           python -m mypy src
-      - name: Real ELF scratch integration
+      - name: Real ELF scratch and cold JIT integration
         shell: bash
         run: |
           set -euo pipefail
           gcc --version
+          g++ --version
+          strace --version
           docker version
           cd caller
           env -u PYTHONPATH -u PYTHONHOME "$RUNNER_TEMP/rdc/test/bin/python" -s -m tests --group integration
