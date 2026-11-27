@@ -1,15 +1,15 @@
 """Validate a trace-selected native C++ toolchain in an isolated scratch image."""
 
+import hashlib
 import json
 import os
 import shutil
 import subprocess
-import tarfile
 import tempfile
-import uuid
 from pathlib import Path
 
 from rdc.collector import collect
+from rdc.docker import RuntimeCase, validate_docker
 from rdc.discovery.elf import read_elf
 from rdc.discovery.jit import add_jit_inputs, query_compiler
 from rdc.discovery.loader import LoaderProfile, discover_elf
@@ -224,35 +224,25 @@ class JitScratchContract(TestSuite):
                                       ("observed-toolchain", "elf", "scratch-cold-jit"))
                 plan = plan_collection(discovered.graph, discovered.roots, profile.policy, build)
                 runtime = root / "runtime"
-                manifest = json.loads(collect(plan, runtime))
+                manifest_bytes = collect(plan, runtime)
+                manifest = json.loads(manifest_bytes)
                 self.assertEqual({item["target"] for item in manifest["files"]},
                                  set(files) | set(by_target))
                 self.assertFalse((runtime / "etc/ld.so.cache").exists())
                 self.assertFalse((runtime / "tmp/expression.so").exists())
                 print("JIT_SCRATCH_COLLECTION", len(manifest["files"]),
                       manifest["collected_bytes"], flush=True)
-                archive = root / "rootfs.tar"
-                with tarfile.open(archive, "w", dereference=False) as stream:
-                    stream.add(runtime, arcname=".")
-                image = "rdc-jit-scratch:" + uuid.uuid4().hex
-                try:
-                    with archive.open("rb") as stream:
-                        subprocess.run(("docker", "import", "-", image), stdin=stream,
-                                       check=True, timeout=180, capture_output=True)
-                    actual = command(
-                        "docker", "run", "--rm", "--network", "none", "--read-only",
-                        "--cap-drop", "ALL", "--security-opt", "no-new-privileges",
-                        "--user", "65534:65534",
-                        "--tmpfs", "/tmp:rw,exec,nosuid,nodev,mode=1777,size=128m",
-                        "-e", "PATH=/usr/bin:/bin", "-e", "LANG=C", "-e", "LC_ALL=C",
-                        "-e", "HOME=/tmp", "-e", "TMPDIR=/tmp",
-                        image, _DRIVER_TARGET, compiler, _HEADER_TARGET, "/tmp",
-                    )
-                    self.assertEqual(actual, trace.stdout)
-                    print("JIT_SCRATCH_COLD_EQUIVALENCE_PASS", len(manifest["files"]),
-                          manifest["collected_bytes"], repr(actual), flush=True)
-                finally:
-                    subprocess.run(("docker", "image", "rm", image), check=False,
-                                   timeout=60, capture_output=True)
+                receipt = validate_docker(
+                    runtime, manifest_bytes, hashlib.sha256(manifest_bytes).hexdigest(),
+                    RuntimeCase((_DRIVER_TARGET, compiler, _HEADER_TARGET, "/tmp"),
+                                trace.stdout.encode(), executable_tmpfs=True),
+                )
+                self.assertEqual(receipt.stdout_sha256,
+                                 hashlib.sha256(trace.stdout.encode()).hexdigest())
+                self.assertEqual(receipt.collected_bytes, manifest["collected_bytes"])
+                print("JIT_SCRATCH_COLD_EQUIVALENCE_PASS", len(manifest["files"]),
+                      receipt.collected_bytes, repr(trace.stdout), flush=True)
+                print("JIT_RUNTIME_VALIDATOR_PASS", receipt.image_id, receipt.image_bytes,
+                      receipt.archive_sha256, flush=True)
 
         self.run_contract(check=check)

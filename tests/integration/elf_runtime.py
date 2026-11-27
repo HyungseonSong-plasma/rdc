@@ -1,14 +1,14 @@
 """Compile a real transitive ELF fixture and execute its collected scratch root."""
 
+import hashlib
 import json
 import shutil
 import subprocess
-import tarfile
 import tempfile
-import uuid
 from pathlib import Path
 
 from rdc.collector import collect
+from rdc.docker import RuntimeCase, validate_docker
 from rdc.discovery.elf import read_elf
 from rdc.discovery.loader import LoaderProfile, discover_elf
 from rdc.models import BuildIdentity, CollectionPolicy
@@ -92,27 +92,27 @@ class ElfRuntimeContract(TestSuite):
                                       ("static-elf", "scratch-fixture"))
                 plan = plan_collection(result.graph, result.roots, profile.policy, build)
                 root = work / "runtime"
-                manifest = json.loads(collect(plan, root))
+                manifest_bytes = collect(plan, root)
+                manifest = json.loads(manifest_bytes)
                 self.assertGreater(manifest["collected_bytes"], 0)
                 # glibc's default ABI path matches the explicit fixture profile.
                 baseline = command(str(work / "app"))
                 self.assertEqual(baseline, "42\n")
-                archive = work / "rootfs.tar"
-                with tarfile.open(archive, "w", dereference=False) as tar:
-                    tar.add(root, arcname=".")
-                image = "rdc-elf-fixture:" + uuid.uuid4().hex
-                try:
-                    with archive.open("rb") as stream:
-                        subprocess.run(("docker", "import", "-", image), stdin=stream,
-                                       check=True, timeout=120, capture_output=True)
-                    actual = command("docker", "run", "--rm", "--network", "none",
-                                     "--read-only", "--cap-drop", "ALL",
-                                     "--user", "65534:65534", image, "/opt/fixture/app")
-                    self.assertEqual(actual, baseline)
-                    print("ELF_SCRATCH_EQUIVALENCE_PASS", len(closure.nodes),
-                          manifest["collected_bytes"], repr(actual), flush=True)
-                finally:
-                    subprocess.run(("docker", "image", "rm", image), check=False,
-                                   timeout=60, capture_output=True)
+                receipt = validate_docker(
+                    root, manifest_bytes, hashlib.sha256(manifest_bytes).hexdigest(),
+                    RuntimeCase(("/opt/fixture/app",), baseline.encode()),
+                )
+                self.assertEqual(receipt.stdout_sha256, hashlib.sha256(baseline.encode()).hexdigest())
+                self.assertEqual(receipt.collected_bytes, manifest["collected_bytes"])
+                print("ELF_SCRATCH_EQUIVALENCE_PASS", len(closure.nodes),
+                      receipt.collected_bytes, repr(baseline), flush=True)
+                print("RUNTIME_VALIDATOR_PASS", receipt.image_id, receipt.image_bytes,
+                      receipt.archive_sha256, flush=True)
+
+                with self.assertRaisesRegex(ValueError, "output mismatch"):
+                    validate_docker(
+                        root, manifest_bytes, hashlib.sha256(manifest_bytes).hexdigest(),
+                        RuntimeCase(("/opt/fixture/app",), b"wrong\n"),
+                    )
 
         self.run_contract(check=check)
